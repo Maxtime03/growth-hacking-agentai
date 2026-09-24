@@ -26,18 +26,31 @@ export async function GET(request: Request) {
     const list = await listResponse.json() as { messages?: Array<{ id: string }>; nextPageToken?: string; threadId?: string; payload?: unknown };
     if (threadId) {
       const messages = flattenThread(list);
-      return Response.json({ connection: { id: connection.id, email: connection.email_address, displayName: connection.display_name }, items: normalizeMessages(messages, connection.email_address), nextPageToken: null });
+      const normalized = normalizeMessages(messages, connection.email_address);
+      await Promise.all(normalized.filter((item) => item.direction === "inbound").map((item) => handleInbound(connection.id, item)));
+      return Response.json({ connection: { id: connection.id, email: connection.email_address, displayName: connection.display_name }, items: normalized, nextPageToken: null });
     }
     const messages = await Promise.all((list.messages || []).map(async ({ id }) => {
       const response = await gmailFetch(token, `messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`);
       return await response.json() as GmailMessage;
     }));
     const normalized = normalizeMessages(messages, connection.email_address);
+    await Promise.all(normalized.filter((item) => item.direction === "inbound").map((item) => handleInbound(connection.id, item)));
     await supabaseRest(`email_connections?id=eq.${encodeURIComponent(connection.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }) });
     return Response.json({ connection: { id: connection.id, email: connection.email_address, displayName: connection.display_name }, items: normalized, nextPageToken: list.nextPageToken || null });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Boîte Gmail indisponible." }, { status: 503 });
   }
+}
+
+async function handleInbound(connectionId: string, item: ReturnType<typeof normalizeMessages>[number]) {
+  const workspaceResponse = await supabaseRest("email_connections?id=eq." + encodeURIComponent(connectionId) + "&select=owner_email");
+  if (!workspaceResponse.ok) return;
+  await supabaseRest("email_messages", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ connection_id: connectionId, provider_message_id: item.id, thread_id: item.threadId, direction: "inbound", classification: item.classification, subject: item.subject, snippet: item.snippet, has_attachments: item.hasAttachments }) });
+  const queued = await supabaseRest(`outbound_messages?metadata->>threadId=eq.${encodeURIComponent(item.threadId)}&status=eq.queued&select=id,workspace_id,recipient`);
+  const rows = queued.ok ? await queued.json() as Array<{ id: string; workspace_id: string; recipient: string }> : [];
+  for (const row of rows) await supabaseRest(`outbound_messages?id=eq.${encodeURIComponent(row.id)}&status=eq.queued`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "cancelled", stop_reason: `Réponse entrante: ${item.classification}`, triggered_by_message_id: item.id }) });
+  if (item.classification === "negative" && rows[0]?.recipient) await supabaseRest("suppression_list", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: rows[0].workspace_id, email: rows[0].recipient, reason: "Réponse négative ou désinscription" }) });
 }
 
 function flattenThread(value: { messages?: Array<Record<string, unknown>>; payload?: unknown }) {

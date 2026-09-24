@@ -33,6 +33,7 @@ if (!user) {
   user = await admin("users", { method: "POST", body: JSON.stringify({ email, password, email_confirm: false, user_metadata: {} }) });
   userState = "créé";
 }
+if (user.email_confirmed_at == null) await admin(`users/${user.id}`, { method: "PUT", body: JSON.stringify({ email_confirm: true }) });
 const workspaces = await fetch(`${url}/rest/v1/workspaces?slug=eq.lexicon&select=id&limit=1`, { headers }).then(async (r) => { if (!r.ok) throw new Error("Espace Lexicon introuvable."); return r.json(); });
 if (!workspaces[0]?.id || !user?.id) throw new Error("Utilisateur ou espace Lexicon introuvable.");
 const membership = await fetch(`${url}/rest/v1/workspace_members`, { method: "POST", headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: workspaces[0].id, user_id: user.id, role: "member", permissions: { email_read: true, email_compose: true, email_send: true, campaign_manage: true } }) });

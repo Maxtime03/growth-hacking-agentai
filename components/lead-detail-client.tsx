@@ -7,6 +7,27 @@ export default function LeadDetailClient({ id }: { id: string }) {
   useEffect(() => { fetch(`/api/leads/${encodeURIComponent(id)}`, { cache: "no-store" }).then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Lead introuvable."); setLead(payload.item); }).catch((cause) => setError(cause instanceof Error ? cause.message : "Lead introuvable.")); }, [id]);
   async function enrich() {
     if (!lead || busy) return; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: lead.externalId || lead.id, company: lead.company, location: lead.location, sourceUrl: lead.sourceUrl, website: lead.website }) });
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Enrichissement impossible.");
+      if (response.status === 202 && payload.jobId) {
+        setNotice("Enrichissement placé en file…");
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          const statusResponse = await fetch(`/api/enrich/${encodeURIComponent(payload.jobId)}`, { cache: "no-store" });
+          const statusPayload = await statusResponse.json();
+          if (statusPayload.job?.status === "completed") { setNotice("Enrichissement terminé et fiche actualisée."); break; }
+          if (["failed", "cancelled"].includes(statusPayload.job?.status)) throw new Error(statusPayload.job.error_message || "Enrichissement interrompu.");
+          setNotice(`Enrichissement en cours (${statusPayload.job?.progress || 0} %)…`);
+        }
+      } else {
+        setLead((current) => current ? { ...current, ...(payload.lead || {}), enrichment: payload.enrichment } : current);
+        setNotice("Enrichissement terminé et fiche actualisée.");
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Enrichissement impossible."); } finally { setBusy(false); }
+  }
+  async function enrichLegacy() {
+    if (!lead || busy) return; setBusy(true); setError(""); setNotice("");
     try { const response = await fetch("/api/enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: lead.externalId || lead.id, company: lead.company, location: lead.location, sourceUrl: lead.sourceUrl, website: lead.website }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Enrichissement impossible."); setLead((current) => current ? { ...current, ...(payload.lead || {}), enrichment: payload.enrichment } : current); setNotice("Enrichissement terminé et fiche actualisée."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Enrichissement impossible."); } finally { setBusy(false); }
   }

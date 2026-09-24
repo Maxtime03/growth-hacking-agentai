@@ -7,6 +7,50 @@ const USER_AGENT = "NetAILeadOS/1.0 (hello@net-ia.biz)";
 
 export async function POST(request: Request) {
   const user = await getAuthorizedChatGPTUser();
+  if (!user) return Response.json({ error: "AccÃ¨s non autorisÃ©." }, { status: 401 });
+  const input = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const externalId = clean(input.id || input.externalId, 200);
+  if (!externalId) return Response.json({ error: "Identifiant du lead absent." }, { status: 400 });
+  try {
+    const leadResponse = await supabaseRest(`leads?external_id=eq.${encodeURIComponent(externalId)}&select=id,workspace_id&limit=1`);
+    const leads = await leadResponse.json() as Array<{ id: string; workspace_id: string }>;
+    if (!leads[0]) return Response.json({ error: "Lead introuvable." }, { status: 404 });
+    const idempotency = clean(String(input.idempotencyKey || `${leads[0].id}:${Math.floor(Date.now() / 60000)}`), 180)!;
+    const jobResponse = await supabaseRest("enrichment_runs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ workspace_id: leads[0].workspace_id, lead_id: leads[0].id, provider: "apify_openai", status: "queued", progress: 0, attempts: 0, idempotency_key: idempotency, fields_requested: ["company", "contacts", "sources", "summary"] }) });
+    let jobs = jobResponse.ok ? await jobResponse.json() as Array<{ id: string }> : [];
+    if (!jobs[0]) {
+      const existing = await supabaseRest(`enrichment_runs?lead_id=eq.${encodeURIComponent(leads[0].id)}&status=in.(queued,running)&select=id&limit=1`);
+      jobs = existing.ok ? await existing.json() as Array<{ id: string }> : [];
+    }
+    if (!jobs[0]) return Response.json({ error: "Impossible de créer le job d'enrichissement." }, { status: 503 });
+    const jobId = jobs[0].id;
+    void processEnrichmentJob(jobId, input, user.email);
+    return Response.json({ jobId, status: "queued", progress: 0 }, { status: 202 });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Lancement de l'enrichissement impossible." }, { status: 503 });
+  }
+}
+
+async function processEnrichmentJob(jobId: string, input: Record<string, unknown>, ownerEmail: string) {
+  const current = await supabaseRest(`enrichment_runs?id=eq.${encodeURIComponent(jobId)}&select=attempts,status&limit=1`);
+  const rows = current.ok ? await current.json() as Array<{ attempts?: number; status?: string }> : [];
+  if (rows[0]?.status === "cancelled" || rows[0]?.status === "completed") return;
+  const attempt = Number(rows[0]?.attempts || 0) + 1;
+  await supabaseRest(`enrichment_runs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "running", progress: 10, attempts: attempt, locked_at: new Date().toISOString() }) });
+  const response = await executeEnrichment(new Request("http://internal/api/enrich", { method: "POST", headers: { "Content-Type": "application/json", "oai-authenticated-user-email": ownerEmail }, body: JSON.stringify(input) }));
+  const payload = await response.json().catch(() => ({}));
+  if (response.ok) {
+    await supabaseRest(`enrichment_runs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "completed", progress: 100, result: payload, error_message: null, completed_at: new Date().toISOString(), locked_at: null }) });
+    return;
+  }
+  const retry = attempt < 3;
+  const retryAt = retry ? new Date(Date.now() + 2 ** attempt * 1000).toISOString() : null;
+  await supabaseRest(`enrichment_runs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: retry ? "queued" : "failed", progress: 0, result: {}, error_message: payload.error || "Échec de l'enrichissement", next_retry_at: retryAt, completed_at: retry ? null : new Date().toISOString(), locked_at: null }) });
+  if (retry) setTimeout(() => void processEnrichmentJob(jobId, input, ownerEmail), 2 ** attempt * 1000);
+}
+
+async function executeEnrichment(request: Request) {
+  const user = await getAuthorizedChatGPTUser();
   if (!user) {
     return Response.json({ error: "Accès non autorisé." }, { status: 401 });
   }
