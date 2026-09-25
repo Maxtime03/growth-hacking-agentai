@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 const lead = { id: "lead-e2e-1", externalId: "lead-e2e-1", company: "Entreprise E2E", location: "Brabant wallon", kind: "Parc d'affaires", score: 82, confidence: 90, status: "À vérifier", temperature: "Chaud", recommendedOffer: "Pluq", phone: "+321234567", email: "contact@example.test", website: null, decisionMaker: null, operator: null, openingHours: null, description: null, chargers: 0, chargersWithin500m: 1, chargersWithin2km: 4, nearestChargerMeters: 450, sourceUrl: "https://maps.google.com/", coordinates: { lat: 50.66, lon: 4.61 } };
 
 async function mockApis(page: import("@playwright/test").Page) {
-  await page.route("https://maps.googleapis.com/maps/api/js**", (route) => route.abort());
+  await page.route("https://maps.googleapis.com/maps/api/js**", (route) => route.fulfill({ status: 200, contentType: "application/javascript", body: "window.google = undefined;" }));
   let completed = false;
   await page.route("**/api/opportunities**", async (route) => {
     if (route.request().method() === "POST") { completed = true; await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ runId: "e2e-run", status: "running", desiredLimit: 10 }) }); return; }
@@ -12,6 +12,7 @@ async function mockApis(page: import("@playwright/test").Page) {
   await page.route("**/api/enrich", async (route) => await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ linkedinFound: false, lead, enrichment: { summary: "Résumé E2E", icebreaker: "Fait public E2E", whyNow: "Signal E2E", callBrief: ["Étape 1", "Étape 2", "Étape 3"], sources: ["https://example.test/source"] } }) }));
   await page.route("**/api/leads/lead-e2e-1", async (route) => await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ item: lead }) }));
   await page.route("**/api/leads?**", async (route) => await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [lead], meta: { page: 1, pageSize: 50, total: 1, pageCount: 1 } }) }));
+  await page.route("**/api/email/connections**", async (route) => await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) }));
 }
 
 test.describe("navigation réelle Chromium", () => {
@@ -22,6 +23,8 @@ test.describe("navigation réelle Chromium", () => {
     await page.addInitScript(() => { (window as Window & { __e2eConsoleErrors?: string[] }).__e2eConsoleErrors = []; });
     await mockApis(page);
     await page.goto("/");
+    await page.waitForLoadState("domcontentloaded");
+    await page.locator("nav a[href]").first().waitFor({ state: "visible" });
     await page.evaluate(() => { (window as Window & { __e2eConsoleErrors?: string[] }).__e2eConsoleErrors = []; });
     (page as unknown as { __errors?: string[] }).__errors = errors;
   });

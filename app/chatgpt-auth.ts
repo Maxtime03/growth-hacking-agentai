@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { runtimeEnv } from "@/lib/runtime-env";
 
 export type ChatGPTUser = {
   displayName: string;
@@ -39,8 +40,8 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
 
 async function getSupabaseUserFromCookie(): Promise<ChatGPTUser | null> {
   const accessToken = (await cookies()).get("sb-access-token")?.value;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const url = runtimeEnv("NEXT_PUBLIC_SUPABASE_URL")?.replace(/\/$/, "");
+  const key = runtimeEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
   if (!accessToken || !url || !key) return null;
   const response = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${accessToken}` }, cache: "no-store" }).catch(() => null);
   if (!response?.ok) return null;
@@ -63,7 +64,7 @@ export async function getAuthorizedChatGPTUser(): Promise<ChatGPTUser | null> {
 }
 
 export async function isLocalDevelopmentRequest(): Promise<boolean> {
-  if (process.env.LOCAL_DEV_MODE !== "true") return false;
+  if (runtimeEnv("LOCAL_DEV_MODE") !== "true") return false;
 
   const requestHeaders = await headers();
   const forwardedHost = requestHeaders.get("x-forwarded-host")?.split(",")[0]?.trim();

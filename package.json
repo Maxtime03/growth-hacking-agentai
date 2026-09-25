@@ -9,9 +9,10 @@
     "install:ci": "bash scripts/install-ci.sh",
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
     "dev:windows": "vite --host 127.0.0.1 --port 3000",
-    "build:windows": "vinext build",
+    "patch:vinext": "node scripts/patch-vinext-windows.mjs",
+    "build:windows": "npm run patch:vinext && vinext build",
     "build": "bash scripts/build-verified.sh",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

@@ -1,8 +1,9 @@
 const encoder = new TextEncoder();
+import { runtimeEnv } from "@/lib/runtime-env";
 
 export function requireSupabaseServerConfig() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = runtimeEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const key = runtimeEnv("SUPABASE_SECRET_KEY") || runtimeEnv("SUPABASE_SERVICE_ROLE_KEY");
   const missing = [!url && "NEXT_PUBLIC_SUPABASE_URL", !key && "SUPABASE_SECRET_KEY (ou SUPABASE_SERVICE_ROLE_KEY)"].filter(Boolean);
   if (missing.length) throw new Error(`Configuration Supabase serveur incomplète : ${missing.join(", ")}.`);
   return { url: url!.replace(/\/$/, ""), key: key! };
@@ -10,7 +11,7 @@ export function requireSupabaseServerConfig() {
 
 export function requireEmailStorageConfig() {
   const supabase = requireSupabaseServerConfig();
-  const encryptionSecret = process.env.TOKEN_ENCRYPTION_KEY;
+  const encryptionSecret = runtimeEnv("TOKEN_ENCRYPTION_KEY");
   if (!encryptionSecret) throw new Error("Configuration email incomplète : TOKEN_ENCRYPTION_KEY manque dans .env.local.");
   return { ...supabase, encryptionSecret };
 }

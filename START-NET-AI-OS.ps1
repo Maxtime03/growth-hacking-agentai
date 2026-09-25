@@ -1,5 +1,6 @@
 ﻿$ErrorActionPreference = "Stop"
 $ProjectPath = $PSScriptRoot
+$Production = $args -contains '-Production'
 
 Set-Location $ProjectPath
 
@@ -9,8 +10,18 @@ if (-not (Test-Path "node_modules")) {
 }
 
 $env:LOCAL_DEV_MODE = "true"
+if (Test-Path ".env.local") {
+  Get-Content ".env.local" | ForEach-Object {
+    if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') {
+      $name = $Matches[1]
+      $value = $Matches[2].Trim()
+      if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) { $value = $value.Substring(1, $value.Length - 2) }
+      [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+  }
+}
 
 Write-Host "Mode local activé." -ForegroundColor Green
 Write-Host "Net.AI OS démarre sur http://127.0.0.1:3000" -ForegroundColor Magenta
 
-npx vite --host 127.0.0.1 --port 3000 --strictPort
+if ($Production) { npx.cmd vinext start --hostname 127.0.0.1 --port 3000 } else { npx.cmd vite --host 127.0.0.1 --port 3000 --strictPort }
