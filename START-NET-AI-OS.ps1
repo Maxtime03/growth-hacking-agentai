@@ -26,4 +26,4 @@ if (Test-Path ".env.local") {
 Write-Host "Mode local activé." -ForegroundColor Green
 Write-Host "Net.AI OS démarre sur http://127.0.0.1:3000" -ForegroundColor Magenta
 
-if ($Production) { npx.cmd vinext start --hostname 127.0.0.1 --port 3000 } else { npx.cmd vite --host 127.0.0.1 --port 3000 --strictPort }
+if ($Production -or $LocalProduction) { npx.cmd vinext start --hostname 127.0.0.1 --port 3000 } else { npx.cmd vite --host 127.0.0.1 --port 3000 --strictPort }
