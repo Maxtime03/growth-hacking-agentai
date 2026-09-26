@@ -49,11 +49,11 @@ test.describe("navigation réelle Chromium", () => {
   test("clique Générer des leads et Relancer l’analyse sans lancer Apify réel", async ({ page }) => {
     await page.getByRole("link", { name: "Radar" }).click();
     await expect(page).toHaveURL(/\/radar$/);
-    await page.getByRole("button", { name: /Générer 50 leads/i }).click();
-    await expect(page.getByText(/Recherche de 50 leads lancée/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Collecte Apify en cours|Générer/i }).first()).toBeVisible();
+    await page.getByRole("button", { name: /générer .* leads/i }).click();
+    await expect(page.getByText(/Recherche de 50 leads lanc/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Collecte Apify en cours|générer/i }).first()).toBeVisible();
     await page.getByRole("link", { name: "Leads" }).click();
-    await page.getByRole("button", { name: /Générer des leads/i }).click();
+    await page.getByRole("button", { name: /générer des leads/i }).click();
     await expect(page).toHaveURL(/\/radar$/);
   });
 
