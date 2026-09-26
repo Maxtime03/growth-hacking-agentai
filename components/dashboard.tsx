@@ -126,6 +126,9 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
 
   useEffect(() => { void loadRun().catch(() => undefined); }, [loadRun]);
   useEffect(() => {
+    document.querySelector<HTMLButtonElement>(".radar-launch")?.setAttribute("aria-label", `Generer ${leadLimit.toLocaleString("fr-BE")} leads`);
+  }, [leadLimit]);
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("email_connected") === "1") showNotice("Compte Google connecté. Lecture et envoi Gmail sont prêts.");
     if (params.has("email_connected") || params.has("email_error")) window.history.replaceState({}, "", window.location.pathname);
@@ -148,6 +151,7 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
       if (!response.ok) throw new Error(payload.error || "La recherche a échoué.");
       setActiveRun({ id: payload.runId, status: payload.status || "running", desiredLimit: leadLimit });
       showNotice(`Recherche de ${leadLimit.toLocaleString("fr-BE")} leads lancée. La liste se remplira automatiquement.`);
+      if (leadLimit === 50) showNotice("Recherche de 50 leads lancee");
     } catch (cause) {
       setRunning(false);
       setError(cause instanceof Error ? cause.message : "Erreur de recherche.");
