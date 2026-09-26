@@ -18,14 +18,18 @@ export async function POST(request: Request) {
     const idempotency = clean(String(input.idempotencyKey || `${leads[0].id}:${Math.floor(Date.now() / 60000)}`), 180)!;
     const jobResponse = await supabaseRest("enrichment_runs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ workspace_id: leads[0].workspace_id, lead_id: leads[0].id, provider: "apify_openai", status: "queued", progress: 0, attempts: 0, idempotency_key: idempotency, fields_requested: ["company", "contacts", "sources", "summary"] }) });
     let jobs = jobResponse.ok ? await jobResponse.json() as Array<{ id: string }> : [];
+    const created = Boolean(jobs[0]);
     if (!jobs[0]) {
       const existing = await supabaseRest(`enrichment_runs?lead_id=eq.${encodeURIComponent(leads[0].id)}&status=in.(queued,running)&select=id&limit=1`);
       jobs = existing.ok ? await existing.json() as Array<{ id: string }> : [];
     }
     if (!jobs[0]) return Response.json({ error: "Impossible de créer le job d'enrichissement." }, { status: 503 });
     const jobId = jobs[0].id;
-    await supabaseRest("enrichment_queue", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ enrichment_run_id: jobId, workspace_id: leads[0].workspace_id, payload: { ...input, id: externalId }, status: "queued" }) });
-    void processEnrichmentJob(jobId, input, user.email);
+    if (created) {
+      await supabaseRest("enrichment_queue", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ enrichment_run_id: jobId, workspace_id: leads[0].workspace_id, payload: { ...input, id: externalId }, status: "queued" }) });
+      const queued = await supabaseRest("rpc/enqueue_enrichment_job", { method: "POST", body: JSON.stringify({ p_run_id: jobId, p_workspace_id: leads[0].workspace_id, payload: { ...input, id: externalId } }) });
+      if (!queued.ok) return Response.json({ error: "La file durable Supabase est indisponible." }, { status: 503 });
+    }
     return Response.json({ jobId, status: "queued", progress: 0 }, { status: 202 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Lancement de l'enrichissement impossible." }, { status: 503 });
@@ -50,7 +54,6 @@ export async function processEnrichmentJob(jobId: string, input: Record<string, 
   const retryAt = retry ? new Date(Date.now() + 2 ** attempt * 1000).toISOString() : null;
   await supabaseRest(`enrichment_runs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: retry ? "queued" : "failed", progress: 0, result: {}, error_message: payload.error || "Échec de l'enrichissement", next_retry_at: retryAt, completed_at: retry ? null : new Date().toISOString(), locked_at: null }) });
   await supabaseRest(`enrichment_queue?enrichment_run_id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: retry ? "queued" : "failed", available_at: retryAt || new Date().toISOString(), last_error: payload.error || "Échec de l'enrichissement", locked_at: null, completed_at: retry ? null : new Date().toISOString() }) });
-  if (retry) setTimeout(() => void processEnrichmentJob(jobId, input, ownerEmail), 2 ** attempt * 1000);
 }
 
 async function executeEnrichment(request: Request) {

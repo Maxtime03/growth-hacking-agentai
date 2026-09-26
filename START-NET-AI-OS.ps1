@@ -1,6 +1,7 @@
 ﻿$ErrorActionPreference = "Stop"
 $ProjectPath = $PSScriptRoot
 $Production = $args -contains '-Production'
+$LocalProduction = $args -contains '-LocalProduction'
 
 Set-Location $ProjectPath
 
@@ -9,7 +10,8 @@ if (-not (Test-Path "node_modules")) {
   exit 1
 }
 
-$env:LOCAL_DEV_MODE = "true"
+$env:LOCAL_DEV_MODE = if ($Production -and -not $LocalProduction) { "false" } else { "true" }
+$env:NODE_USE_SYSTEM_CA = "1"
 if (Test-Path ".env.local") {
   Get-Content ".env.local" | ForEach-Object {
     if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') {
