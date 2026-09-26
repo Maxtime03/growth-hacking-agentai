@@ -15,6 +15,9 @@ type Props = {
 };
 
 export default function CrmWorkspacePages(props: Props) {
+  const normalizedPage = props.page.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  if (normalizedPage === "Expediteurs") return <Campaigns {...props} />;
+  if (normalizedPage === "Parametres") return <SettingsPage />;
   if (props.page === "Vue d'ensemble") return <Overview {...props} />;
   if (props.page === "Enrichissement") return <Enrichment {...props} />;
   if (props.page === "File d'appels") return <CallQueue {...props} />;

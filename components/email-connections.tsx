@@ -9,11 +9,14 @@ export default function EmailConnections({ expanded = false }: { expanded?: bool
   const [items, setItems] = useState<Connection[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/api/email/connections").then(async (response) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    fetch("/api/email/connections", { signal: controller.signal }).then(async (response) => {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Comptes indisponibles.");
       setItems(payload.items || []);
-    }).catch((cause) => setError(cause instanceof Error ? cause.message : "Comptes indisponibles."));
+    }).catch((cause) => setError(cause instanceof Error && cause.name === "AbortError" ? "La connexion email a expiré. Réessayez ou reconnectez Google." : cause instanceof Error ? cause.message : "Comptes indisponibles.")).finally(() => window.clearTimeout(timeout));
+    return () => { window.clearTimeout(timeout); controller.abort(); };
   }, []);
   return <section className={`email-connections ${expanded ? "email-connections-expanded" : ""}`}>
     <div><p className="eyebrow">EXPÉDITEURS</p><h2>Comptes email professionnels et personnels</h2><span>Connexion OAuth sécurisée. Net.AI OS ne reçoit jamais votre mot de passe.</span></div>

@@ -51,6 +51,7 @@ const navigation = [
   { label: "File d'appels", path: "/appels", icon: Phone, badge: "12" },
   { label: "Campagnes", path: "/campagnes", icon: Send }, { label: "Suivis", path: "/suivis", icon: History },
   { label: "Content Studio", path: "/content", icon: FileText }, { label: "Analyses", path: "/analyses", icon: BarChart3 },
+  { label: "Expéditeurs", path: "/settings/email", icon: Mail }, { label: "Paramètres", path: "/settings", icon: Settings },
 ];
 
 const pathToNav: Record<string, string> = { "/": "Vue d'ensemble", "/radar": "Radar", "/leads": "Leads", "/enrichissement": "Enrichissement", "/appels": "File d'appels", "/campagnes": "Campagnes", "/suivis": "Suivis", "/content": "Content Studio", "/analyses": "Analyses", "/settings/email": "Expéditeurs", "/settings": "Paramètres" };
@@ -104,7 +105,7 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
   const paginated = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
   const mapLeads = useMemo(() => opportunities.slice(0, 1000), [opportunities]);
   const lexiconOnly = userEmail.trim().toLowerCase() === "etiennedujardin@hotmail.com";
-  const visibleNavigation = lexiconOnly ? navigation.filter((item) => ["Vue d'ensemble", "Radar", "Leads", "Enrichissement", "File d'appels", "Campagnes", "Suivis", "Analyses"].includes(item.label)) : navigation;
+  const visibleNavigation = lexiconOnly ? navigation.filter((item) => ["Vue d'ensemble", "Radar", "Leads", "Enrichissement", "File d'appels", "Campagnes", "Suivis", "Analyses", "Expéditeurs"].includes(item.label)) : navigation;
   const activeWorkspace = workspaceForProfile(searchProfile);
 
   const loadRun = useCallback(async (runId?: string) => {
