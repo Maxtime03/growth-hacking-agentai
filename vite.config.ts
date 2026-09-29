@@ -46,6 +46,7 @@ export default defineConfig(async ({ command, mode }) => {
   const localDevelopmentEnabled =
     command === "serve" &&
     (process.env.LOCAL_DEV_MODE ?? fileEnvironment.LOCAL_DEV_MODE) === "true";
+  const useNitro = Boolean(process.env.VERCEL || process.env.NITRO_PRESET);
 
   return {
     // Vinext executes server components in a Worker isolate where arbitrary
@@ -73,11 +74,15 @@ export default defineConfig(async ({ command, mode }) => {
     plugins: [
       vinext(),
       sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        inspectorPort: false,
-        config: localBindingConfig,
-      }),
+      ...(useNitro
+        ? [(await import("nitro/vite")).nitro()]
+        : [
+            cloudflare({
+              viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+              inspectorPort: false,
+              config: localBindingConfig,
+            }),
+          ]),
     ],
   };
 });

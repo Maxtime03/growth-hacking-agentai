@@ -11,6 +11,7 @@
     "dev:windows": "vite --host 127.0.0.1 --port 3000",
     "patch:vinext": "node scripts/patch-vinext-windows.mjs",
     "build:windows": "npm run patch:vinext && vinext build",
+    "build:vercel": "node scripts/build-vercel.mjs",
     "build": "npm run build:windows",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
@@ -56,6 +57,7 @@
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "nitro": "^3.0.260903-beta",
     "react-server-dom-webpack": "19.2.6",
     "supabase": "^2.118.0",
     "tailwindcss": "4.2.1",
@@ -67,4 +69,6 @@
   },
   "type": "module"
 }
+
+
 
