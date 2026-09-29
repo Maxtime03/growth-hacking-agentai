@@ -49,3 +49,8 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+
+# local task artifacts and Supabase CLI state
+/.codex-remote-attachments/
+/supabase/.temp/
+/.tmp-*.mjs

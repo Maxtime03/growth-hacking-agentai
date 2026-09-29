@@ -1,7 +1,9 @@
-import LeadDetailClient from "@/components/lead-detail-client";
+import LeadDetailRich from "@/components/lead-detail-rich";
+import LeadInlineEditorLoader from "@/components/lead-inline-editor-loader";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  return <LeadDetailClient id={(await params).id} />;
+  const id=(await params).id;
+  return <><LeadInlineEditorLoader id={id}/><LeadDetailRich id={id}/></>;
 }

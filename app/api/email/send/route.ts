@@ -6,6 +6,9 @@ import { canAccessWorkspace, normalizeWorkspace } from "@/lib/workspaces";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  if (process.env.SAFE_DRAFT_ONLY !== "false") {
+    return Response.json({ error: "SAFE_DRAFT_ONLY actif : aucun email réel ne peut être envoyé. Créez un brouillon Gmail." }, { status: 423 });
+  }
   try {
     const user = await getAuthorizedChatGPTUser();
     if (!user) return Response.json({ error: "Accès non autorisé." }, { status: 401 });

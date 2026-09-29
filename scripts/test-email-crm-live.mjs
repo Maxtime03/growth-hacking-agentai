@@ -1,0 +1,18 @@
+import fs from "node:fs";
+const raw=fs.readFileSync(".env.local","utf8");
+const env=Object.fromEntries(raw.split(/\r?\n/).filter(line=>line.includes("=")).map(line=>{const index=line.indexOf("=");return[line.slice(0,index),line.slice(index+1).trim().replace(/^"|"$/g,"")];}));
+const q=(value)=>`'${value.replaceAll("'","''")}'`;
+const workspaceId="0a043ab2-0f06-42ad-a5fb-19e01a629d52";
+const accountId="11111111-1111-4111-8111-111111111111",threadId="22222222-2222-4222-8222-222222222222",sequenceId="33333333-3333-4333-8333-333333333333";
+const sql=`begin;
+insert into public.email_accounts(id,owner_email,email_address,encrypted_refresh_token,status) values(${q(accountId)},'crm-test@local.invalid','crm-test@local.invalid','v1.test.test','connected');
+insert into public.email_account_workspaces(account_id,workspace_id) values(${q(accountId)},${q(workspaceId)});
+insert into public.email_threads(id,account_id,workspace_id,gmail_thread_id,lead_id,subject) select ${q(threadId)},${q(accountId)},workspace_id,'thread-test',id,'Test' from public.leads where workspace_id=${q(workspaceId)} limit 1;
+insert into public.email_sequences(id,workspace_id,lead_id,account_id,name,status,safe_draft_only) select ${q(sequenceId)},workspace_id,id,${q(accountId)},'Test stop','active',true from public.leads where workspace_id=${q(workspaceId)} limit 1;
+insert into public.email_sequence_steps(workspace_id,sequence_id,account_id,step_order,status) select ${q(workspaceId)},${q(sequenceId)},${q(accountId)},n,'scheduled' from generate_series(1,3)n;
+insert into public.email_messages(account_id,workspace_id,email_thread_id,lead_id,provider_message_id,gmail_message_id,thread_id,gmail_thread_id,direction,classification,from_address,subject,snippet,sent_at) select ${q(accountId)},workspace_id,${q(threadId)},id,'message-test','message-test','thread-test','thread-test','inbound','unsubscribe','prospect-test@local.invalid','Désabonnement','Merci de me désabonner',now() from public.leads where workspace_id=${q(workspaceId)} limit 1;
+insert into public.email_messages(account_id,workspace_id,email_thread_id,lead_id,provider_message_id,gmail_message_id,thread_id,gmail_thread_id,direction,classification,from_address,subject) select ${q(accountId)},workspace_id,${q(threadId)},id,'message-test','message-test','thread-test','thread-test','inbound','unsubscribe','prospect-test@local.invalid','duplicate' from public.leads where workspace_id=${q(workspaceId)} limit 1 on conflict (account_id,gmail_message_id) where account_id is not null and gmail_message_id is not null do nothing;
+select s.status,s.stop_reason,(select count(*) from public.email_sequence_steps x where x.sequence_id=s.id and x.status='cancelled')::int cancelled_steps,(select count(*) from public.email_messages m where m.account_id=${q(accountId)} and m.gmail_message_id='message-test')::int deduplicated_messages,(select count(*) from public.suppression_list z where z.workspace_id=s.workspace_id and z.email='prospect-test@local.invalid')::int suppressions from public.email_sequences s where s.id=${q(sequenceId)};
+rollback;`;
+const response=await fetch("https://api.supabase.com/v1/projects/lqscttwpasobeoegyttx/database/query",{method:"POST",headers:{Authorization:`Bearer ${env.SUPABASE_TOKEN_SECRET}`,"content-type":"application/json"},body:JSON.stringify({query:sql})});
+const text=await response.text();console.log(JSON.stringify({status:response.status,result:response.ok?JSON.parse(text):text.slice(0,1000)}));if(!response.ok)process.exitCode=1;

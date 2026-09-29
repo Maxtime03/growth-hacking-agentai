@@ -1,18 +1,5 @@
 import { getAuthorizedChatGPTUser } from "@/app/chatgpt-auth";
 import { supabaseRest } from "@/lib/email-connections";
-
-export const dynamic = "force-dynamic";
-export async function GET() {
-  const user = await getAuthorizedChatGPTUser();
-  if (!user) return Response.json({ error: "Accès non autorisé." }, { status: 401 });
-  const ownerEmail = user.email.trim().toLowerCase();
-  try {
-    const params = new URLSearchParams({ select: "id,provider,email_address,display_name,status,scopes,last_sync_at,created_at", owner_email: `eq.${ownerEmail}`, order: "created_at.desc" });
-    const response = await supabaseRest(`email_connections?${params}`);
-    if (!response.ok) throw new Error(`Lecture Supabase impossible (${response.status}).`);
-    const items = await response.json() as Array<{ scopes?: string[] | null }>;
-    return Response.json({ items: items.map((item) => ({ ...item, canRead: item.scopes?.includes("https://www.googleapis.com/auth/gmail.readonly") || false, canSend: item.scopes?.includes("https://www.googleapis.com/auth/gmail.send") || false })) });
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Connexion email indisponible." }, { status: 503 });
-  }
-}
+import { canAccessWorkspace, normalizeWorkspace } from "@/lib/workspaces";
+export const dynamic="force-dynamic";
+export async function GET(){const user=await getAuthorizedChatGPTUser();if(!user)return Response.json({error:"Accès non autorisé."},{status:401});try{const r=await supabaseRest(`email_accounts?owner_email=eq.${encodeURIComponent(user.email.toLowerCase())}&select=id,provider,email_address,display_name,status,status_detail,scopes,last_sync_at,last_verified_at,watch_expiration,synced_message_count,token_expires_at,created_at,email_account_workspaces(workspace_id,workspaces(slug,name))&order=created_at.desc`);if(!r.ok)throw new Error(`Lecture Supabase impossible (${r.status}).`);const rows=await r.json() as Array<Record<string,unknown>&{scopes:string[];email_account_workspaces:Array<{workspace_id:string;workspaces:{slug:string;name:string}|null}>}>;const items=rows.map(row=>{const grants=(row.email_account_workspaces||[]).filter(g=>g.workspaces&&canAccessWorkspace(user,normalizeWorkspace(g.workspaces.slug)));return{...row,email_account_workspaces:undefined,workspaces:grants.map(g=>({id:g.workspace_id,slug:g.workspaces!.slug,name:g.workspaces!.name})),canRead:row.scopes?.includes("https://www.googleapis.com/auth/gmail.modify"),canDraft:row.scopes?.includes("https://www.googleapis.com/auth/gmail.compose")};}).filter(row=>(row.workspaces as unknown[]).length>0);return Response.json({items});}catch(error){return Response.json({error:error instanceof Error?error.message:"Comptes indisponibles."},{status:503});}}

@@ -1,5 +1,5 @@
 import { getAuthorizedChatGPTUser } from "@/app/chatgpt-auth";
-import { getEmailConnection, getGoogleAccessToken, getOwnerEmail, gmailFetch } from "@/lib/gmail";
+import { requireEmailAccount } from "@/lib/email-crm";
 import { supabaseRest } from "@/lib/email-connections";
 
 export const dynamic = "force-dynamic";
@@ -10,34 +10,12 @@ export async function GET(request: Request) {
   try {
     const user = await getAuthorizedChatGPTUser();
     if (!user) return Response.json({ error: "Accès non autorisé." }, { status: 401 });
-    const ownerEmail = getOwnerEmail(user.email);
     const url = new URL(request.url);
-    const connection = await getEmailConnection(ownerEmail, url.searchParams.get("connectionId") || undefined);
-    if (!connection.scopes?.includes("https://www.googleapis.com/auth/gmail.readonly")) {
-      return Response.json({ error: "Ce compte a été connecté avant l'activation de la lecture Gmail. Reconnectez-le une fois." }, { status: 409 });
-    }
-    const token = await getGoogleAccessToken(connection);
+    const accountId=url.searchParams.get("connectionId")||"";
+    const {account,workspaceIds}=await requireEmailAccount(user,accountId);
     const threadId = url.searchParams.get("threadId")?.trim();
-    const query = url.searchParams.get("q")?.trim() || "newer_than:60d";
-    const pageToken = url.searchParams.get("pageToken")?.trim();
-    const listResponse = threadId
-      ? await gmailFetch(token, `threads/${encodeURIComponent(threadId)}?format=full`)
-      : await gmailFetch(token, `messages?maxResults=30&q=${encodeURIComponent(query)}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`);
-    const list = await listResponse.json() as { messages?: Array<{ id: string }>; nextPageToken?: string; threadId?: string; payload?: unknown };
-    if (threadId) {
-      const messages = flattenThread(list);
-      const normalized = normalizeMessages(messages, connection.email_address);
-      await Promise.all(normalized.filter((item) => item.direction === "inbound").map((item) => handleInbound(connection.id, item)));
-      return Response.json({ connection: { id: connection.id, email: connection.email_address, displayName: connection.display_name }, items: normalized, nextPageToken: null });
-    }
-    const messages = await Promise.all((list.messages || []).map(async ({ id }) => {
-      const response = await gmailFetch(token, `messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`);
-      return await response.json() as GmailMessage;
-    }));
-    const normalized = normalizeMessages(messages, connection.email_address);
-    await Promise.all(normalized.filter((item) => item.direction === "inbound").map((item) => handleInbound(connection.id, item)));
-    await supabaseRest(`email_connections?id=eq.${encodeURIComponent(connection.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }) });
-    return Response.json({ connection: { id: connection.id, email: connection.email_address, displayName: connection.display_name }, items: normalized, nextPageToken: list.nextPageToken || null });
+    if(threadId){const thread=await supabaseRest(`email_threads?account_id=eq.${account.id}&gmail_thread_id=eq.${encodeURIComponent(threadId)}&workspace_id=in.(${workspaceIds.join(",")})&select=*,leads(id,company_name,legal_name,email)&limit=1`);const threads=thread.ok?await thread.json() as Array<Record<string,unknown>>:[];if(!threads[0])return Response.json({error:"Conversation introuvable."},{status:404});const messages=await supabaseRest(`email_messages?email_thread_id=eq.${threads[0].id}&select=*,email_attachments(*)&order=sent_at.asc`);return Response.json({thread:threads[0],items:messages.ok?await messages.json():[]});}
+    const filter=url.searchParams.get("filter")||"all";const before=url.searchParams.get("before");const clauses=[`account_id=eq.${account.id}`,`workspace_id=in.(${workspaceIds.join(",")})`];if(before)clauses.push(`last_message_at=lt.${encodeURIComponent(before)}`);if(filter==="unread")clauses.push("unread=eq.true");else if(filter==="unmatched")clauses.push("needs_association=eq.true");else if(filter!=="all")clauses.push(`classification=eq.${encodeURIComponent(filter)}`);const response=await supabaseRest(`email_threads?${clauses.join("&")}&select=*,leads(id,company_name,legal_name,email)&order=last_message_at.desc&limit=30`);if(!response.ok)throw new Error(`Lecture CRM impossible (${response.status}).`);const items=await response.json() as Array<Record<string,unknown>>;return Response.json({connection:{id:account.id,email:account.email_address,displayName:account.display_name},items,nextCursor:items.length===30?items[29].last_message_at:null});
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Boîte Gmail indisponible." }, { status: 503 });
   }

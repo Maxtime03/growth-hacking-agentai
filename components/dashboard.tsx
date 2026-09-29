@@ -7,11 +7,12 @@ import {
   Radar, WandSparkles, History, Send, FileText, Flame,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import GoogleRadarMap, { type RadarPoint } from "@/components/google-radar-map";
 import CrmWorkspacePages from "@/components/crm-workspace-pages";
+import LeadsCommand from "@/components/leads-command";
 import { workspaceForProfile } from "@/lib/workspaces";
+import { normalizeProviderLead } from "@/lib/provider-normalization";
 
 export type Opportunity = {
   id: string;
@@ -65,6 +66,7 @@ const regionsByCountry: Record<string, string[]> = {
 
 const searchProfiles = {
   large: { name: "Exploration large", short: "Toutes les entreprises", hint: "Brassez large, puis laissez le score détecter les meilleures offres.", logo: "/netai-logo.png" },
+  enterprise: { name: "Grands Comptes", short: "Organisations complexes", hint: "Recherche dédiée aux groupes multi-sites : taille, implantation, décideurs, signaux publics et probabilité budgétaire — jamais présentée comme un fait.", logo: "/netai-logo.png" },
   pluq: { name: "Pluq", short: "Recharge & parkings", hint: "Hôtels, loisirs, retail, bureaux, santé et sites avec stationnement prolongé.", logo: "/pluq-logo.png" },
   lexicon: { name: "Lexicon", short: "Visibilité IA", hint: "Entreprises visibles, dirigeant identifiable et enjeu de réputation ou d'autorité.", logo: "/lexicon-logo.png" },
   profitflow: { name: "Profitflow", short: "Cashflow & talents", hint: "PME en croissance, besoin de financement ou de compétences flexibles.", logo: "/profitflow-logo.png" },
@@ -114,7 +116,8 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
     if (!response.ok) throw new Error(payload.error || "Impossible de charger la recherche.");
     setActiveRun(payload.run || null);
     if (payload.run?.status === "completed") {
-      setOpportunities(payload.items || []); setMeta(payload.meta || null); setRunning(false); setPage(1);
+      const normalized=(Array.isArray(payload.items)?payload.items:[]).map(normalizeProviderLead).filter(Boolean) as Opportunity[];
+      setOpportunities(normalized); setMeta(payload.meta || null); setRunning(false); setPage(1);
       return true;
     }
     if (payload.run?.status === "failed" || payload.run?.status === "cancelled") {
@@ -167,7 +170,8 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
       const response = await fetch("/api/enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(lead) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "L'enrichissement a échoué.");
-      const enriched = { ...lead, ...payload.lead, enrichment: payload.enrichment };
+      const enriched = normalizeProviderLead({ ...lead, ...payload.lead, enrichment: payload.enrichment }) as Opportunity | null;
+      if (!enriched) throw new Error("La réponse d’enrichissement ne contient pas d’identifiant exploitable.");
       setOpportunities((items) => items.map((item) => item.id === lead.id ? enriched : item));
       setSelected(enriched);
       showNotice(payload.linkedinFound ? "Profil LinkedIn et analyse IA ajoutés." : "Analyse IA ajoutée. Aucun profil LinkedIn public détecté.");
@@ -202,15 +206,15 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="brand-row"><img className="netai-brand" src="/netai-logo.png" alt="Net.AI" /><span className="brand-product">LeadOS</span><button className="icon-button mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fermer"><X size={18} /></button></div>
         <div className="workspace-pill"><div className="workspace-logo-stack"><img src="/pluq-logo.png" alt="Pluq" /><img src="/profitflow-logo.png" alt="Profitflow" /><img src="/lexicon-icon.png" alt="Lexicon" /></div><div><strong>Portefeuille clients</strong><span>3 espaces commerciaux</span></div><ChevronRight size={16} /></div>
-        <nav><p className="nav-title">ESPACE DE TRAVAIL</p>{visibleNavigation.map((item) => <Link key={item.label} href={item.path} onClick={() => { setSidebarOpen(false); router.push(item.path); }} className={`nav-item ${activeNav === item.label ? "active" : ""}`}><item.icon size={18} /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}</Link>)}</nav>
-        <div className="sidebar-footer"><Link className="nav-item" href="/settings"><CircleHelp size={18} /><span>Aide & documentation</span></Link><Link className="nav-item" href="/settings/email"><Settings size={18} /><span>Expéditeurs</span></Link><a className="user-card" href="/signout-with-chatgpt?return_to=/"><div className="avatar">MT</div><div><strong>Maxime</strong><span>{userEmail}</span></div><ChevronRight size={15} /></a></div>
+        <nav><p className="nav-title">ESPACE DE TRAVAIL</p>{visibleNavigation.map((item) => <a key={item.label} href={item.path} onClick={() => setSidebarOpen(false)} className={`nav-item ${activeNav === item.label ? "active" : ""}`}><item.icon size={18} /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}</a>)}</nav>
+        <div className="sidebar-footer"><a className="nav-item" href="/settings"><CircleHelp size={18} /><span>Aide & documentation</span></a><a className="nav-item" href="/settings/email"><Settings size={18} /><span>Expéditeurs</span></a><a className="user-card" href="/signout-with-chatgpt?return_to=/"><div className="avatar">MT</div><div><strong>Maxime</strong><span>{userEmail}</span></div><ChevronRight size={15} /></a></div>
       </aside>
 
       <main className="main-panel">
         <header className="topbar"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button><div className="search-field"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une entreprise, une ville..." /><kbd>⌘ K</kbd></div><button className="icon-button notification" onClick={() => showNotice("Aucune nouvelle notification.")}><Bell size={19} /><i /></button><button className="new-campaign" onClick={() => handleNavigation("Radar")}><Sparkles size={17} />Nouvelle recherche</button></header>
         <div className="content-wrap">
           {!['Radar','Leads'].includes(activeNav) && <CrmWorkspacePages page={activeNav} leads={opportunities} onOpenLead={(lead) => router.push(`/leads/${encodeURIComponent(lead.databaseId || lead.id)}`)} onEnrichLead={(lead) => void enrichLead(lead)} enrichingId={enrichingId} onNavigate={handleNavigation} />}
-          <section className={`welcome-row ${activeNav === "Radar" ? "" : "nav-hidden"}`}><div><p className="eyebrow">NET.AI · REVENUE INTELLIGENCE</p><h1>Radar territorial <span>détectez les bons signaux sur une zone précise.</span></h1></div><div className="live-status"><i />Moteur opérationnel <span>{meta ? `${meta.businessSource} · ${meta.chargingSource}` : `Apify ${apifyConnected ? "connecté" : "non connecté"} · OCM ${ocmConnected ? "connecté" : "non connecté"}`}</span></div></section>
+          <section className={`welcome-row ${activeNav === "Radar" ? "" : "nav-hidden"}`}><div><p className="eyebrow">NET.AI · REVENUE INTELLIGENCE</p><h1>Radar territorial <span>détectez les bons signaux sur une zone précise.</span></h1></div><div className="live-status"><i />Moteur opérationnel <span>{meta ? `${meta.businessSource}${searchProfile === "pluq" ? ` · ${meta.chargingSource}` : ""}` : `Apify ${apifyConnected ? "connecté" : "non connecté"}${searchProfile === "pluq" ? ` · OCM ${ocmConnected ? "connecté" : "non connecté"}` : ""}`}</span></div></section>
 
           {activeNav === "Leads" && <header className="module-head"><div><p className="eyebrow">LEADS</p><h1>Vos opportunités, enfin exploitables.</h1><p>Filtrez, ouvrez la fiche complète, enrichissez le contact et choisissez la prochaine action.</p></div><button className="primary-cta" onClick={() => handleNavigation("Radar")}><Radar size={17}/>Générer des leads</button></header>}
 
@@ -248,22 +252,7 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
             <label>Volume<select value={leadLimit} onChange={(e) => setLeadLimit(Number(e.target.value))}>{leadVolumes.map((value) => <option key={value} value={value}>{value.toLocaleString("fr-BE")} leads</option>)}</select></label>
             <button className="analysis-button" onClick={() => void startAnalysis()} disabled={running}>{running ? <><span className="spinner" />Analyse en cours...</> : <><Zap size={18} />Relancer l'analyse</>}</button>
           </div>{error && <div className="search-error">{error}</div>}</section>
-          <section className={`metrics-grid ${activeNav === "Leads" ? "" : "nav-hidden"}`}>
-            <article><div className="metric-icon mint"><Target size={19} /></div><div><p>Opportunités trouvées</p><strong>{opportunities.length}</strong><span className="positive">Données de la recherche active</span></div></article>
-            <article><div className="metric-icon blue"><Phone size={19} /></div><div><p>Contacts téléphoniques</p><strong>{opportunities.filter((item) => item.phone).length}</strong><span>{opportunities.filter((item) => item.email).length} e-mails publiés</span></div></article>
-            <article><div className="metric-icon amber"><Gauge size={19} /></div><div><p>Score moyen</p><strong>{opportunities.length ? Math.round(opportunities.reduce((sum, item) => sum + item.score, 0) / opportunities.length) : 0}<span>/100</span></strong><span className="positive">Score explicable</span></div></article>
-            <article><div className="metric-icon purple"><Building2 size={19} /></div><div><p>Bornes contrôlées</p><strong>{meta?.chargingStationsChecked || 0}</strong><span>{meta?.chargingSource || "En attente d'analyse"}</span></div></article>
-          </section>
-          <section className={`opportunity-section ${activeNav === "Leads" ? "" : "nav-hidden"}`} id="opportunites"><div className="section-header"><div><h2>Opportunités prioritaires</h2><p>Classées selon le potentiel commercial et la fiabilité des données.</p></div><button className="filter-button" onClick={() => setQuery("")}><Filter size={16} />Réinitialiser</button></div>
-            <div className="table-card"><div className="table-scroll"><table><thead><tr><th>Établissement</th><th>Contact</th><th>Offre recommandée</th><th>Score</th><th>Température</th><th>Statut</th><th /></tr></thead><tbody>{paginated.map((item) => <tr key={item.id} onClick={() => router.push(`/leads/${encodeURIComponent(item.databaseId || item.id)}`)}>
-              <td><div className="company-cell"><div className="company-logo">{item.company.charAt(0)}</div><div><strong>{item.company}</strong><span><MapPin size={12} />{item.location} · {item.kind}</span></div></div></td>
-              <td><div className="contact-cell"><strong>{item.decisionMaker || item.operator || "Responsable à enrichir"}</strong><span>{item.phone || item.email || "Coordonnées à enrichir"}</span></div></td>
-              <td><span className={`offer-tag offer-${(item.recommendedOffer || "analyse").toLowerCase()}`}>{item.recommendedOffer || "À analyser"}</span><small className="fit-copy">{item.fitReason || "Profil à enrichir avant recommandation."}</small></td>
-              <td><div className="score-cell"><ScoreRing value={item.score} /><span>Confiance {item.confidence}%</span></div></td>
-              <td><span className={`temperature temperature-${(item.temperature || "À nourrir").toLowerCase().replace("à ", "")}`}><Flame size={13} />{item.temperature || "À nourrir"}</span></td>
-              <td><span className={`status status-${item.status.toLowerCase().replaceAll(" ", "-").replace("à-", "")}`}>{item.status}</span></td><td><button className="row-action" aria-label={`Voir ${item.company}`} onClick={(event) => { event.stopPropagation(); router.push(`/leads/${encodeURIComponent(item.databaseId || item.id)}`); }}><ChevronRight size={18} /></button></td>
-            </tr>)}</tbody></table>{!running && filtered.length === 0 && <div className="empty-results"><Target size={24} /><strong>Aucune donnée chargée</strong><span>Sélectionnez une ville ou une zone, choisissez le volume, puis cliquez sur « Générer ».</span></div>}</div><div className="table-footer"><span>{filtered.length} opportunités dans cette recherche{meta ? ` · ${meta.totalFound} enregistrées` : ""}</span><div className="lead-pagination"><button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Précédent</button><span>Page {page} / {pageCount}</span><button disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Suivant</button></div><span>{meta ? `Actualisé ${new Date(meta.fetchedAt).toLocaleString("fr-BE")}` : "Source et date affichées après analyse"}</span></div></div>
-          </section>
+          {activeNav === "Leads" && <LeadsCommand lexiconOnly={lexiconOnly} />}
           <section className="enrichment-flow nav-hidden" id="enrichissement"><div className="section-header"><div><h2>De la détection au rendez-vous</h2><p>Chaque étape laisse une trace et impose une prochaine action.</p></div><span className="quality-badge">Anti-perte de lead</span></div><div className="flow-grid">
             <article><span>01</span><Radar size={20}/><strong>Détecter</strong><p>Zone, secteur et signaux adaptés à l'offre.</p></article>
             <article><span>02</span><WandSparkles size={20}/><strong>Enrichir</strong><p>Décideur, e-mail pro, actualité et preuves sourcées.</p></article>
@@ -271,7 +260,7 @@ export default function Dashboard({ userEmail, ocmConnected, apifyConnected }: {
             <article><span>04</span><CalendarClock size={20}/><strong>Suivre</strong><p>Réponse, relance, appel, rendez-vous et historique.</p></article>
           </div><div className="channel-strip"><span><Users size={16}/>LinkedIn</span><span><Mail size={16}/>Google Workspace</span><span><FileText size={16}/>Newsletter & PDF</span><span><Sparkles size={16}/>Placid / contenus</span><small>Connexions à activer séparément par client</small></div></section>
           <section className={`bottom-grid ${activeNav === "Radar" ? "" : "nav-hidden"}`} id="carte">
-            <article className="activity-card"><div className="mini-header"><div><h3>Qualité de la recherche</h3><p>Traçabilité des données utilisées</p></div></div><ul><li><span className="activity-icon green"><CircleCheck size={15} /></span><div><strong>Établissements réels</strong><p>{meta ? `${meta.totalFound} lieux trouvés dans ${region}` : `Google Maps ${apifyConnected ? "connecté" : "non connecté"}`}</p></div><time>APIFY</time></li><li><span className="activity-icon blue"><PlugZap size={15} /></span><div><strong>Couverture des bornes</strong><p>{meta ? `${meta.chargingStationsChecked} emplacements contrôlés` : `Open Charge Map ${ocmConnected ? "connecté" : "non connecté"}`}</p></div><time>{meta?.chargingSource || "OCM"}</time></li><li><span className="activity-icon amber"><Bell size={15} /></span><div><strong>Enrichissement contacts</strong><p>Téléphone, site et e-mail professionnel quand publiés</p></div><time>RGPD</time></li></ul></article>
+            <article className="activity-card"><div className="mini-header"><div><h3>Qualité de la recherche</h3><p>Traçabilité des données utilisées</p></div></div><ul><li><span className="activity-icon green"><CircleCheck size={15} /></span><div><strong>Établissements réels</strong><p>{meta ? `${meta.totalFound} lieux trouvés dans ${region}` : `Google Maps ${apifyConnected ? "connecté" : "non connecté"}`}</p></div><time>APIFY</time></li>{searchProfile === "pluq" && <li><span className="activity-icon blue"><PlugZap size={15} /></span><div><strong>Couverture des bornes</strong><p>{meta ? `${meta.chargingStationsChecked} emplacements contrôlés` : `Open Charge Map ${ocmConnected ? "connecté" : "non connecté"}`}</p></div><time>{meta?.chargingSource || "OCM"}</time></li>}<li><span className="activity-icon amber"><Bell size={15} /></span><div><strong>Enrichissement contacts</strong><p>Téléphone, site et e-mail professionnel quand publiés</p></div><time>RGPD</time></li></ul></article>
           </section>
         </div>
       </main>

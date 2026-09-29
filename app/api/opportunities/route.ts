@@ -158,10 +158,12 @@ async function startApifyRun(region: string, country: string, category: string, 
   const profileTerms: Record<string, string[]> = language === "nl" ? {
     lexicon: ["groeiende onderneming", "business consultancy", "vastgoedbedrijf", "advocatenkantoor"],
     profitflow: ["groeiende KMO", "bouwbedrijf", "logistiek bedrijf", "productiebedrijf"],
+    enterprise: ["hoofdkantoor", "internationale groep", "bedrijf met meerdere vestigingen", "grote werkgever"],
     pluq: Object.values(catalog).map((terms) => terms[0]),
   } : {
     lexicon: ["entreprise en croissance", "cabinet de conseil", "agence immobilière", "cabinet d'avocats"],
     profitflow: ["PME en croissance", "entreprise de construction", "entreprise logistique", "entreprise industrielle"],
+    enterprise: ["siège social", "groupe international", "entreprise multi-sites", "grand employeur"],
     pluq: Object.values(catalog).map((terms) => terms[0]),
   };
   const selectedTerms = profile !== "large" && profileTerms[profile]
@@ -169,13 +171,16 @@ async function startApifyRun(region: string, country: string, category: string, 
     : category === "Toutes les catégories"
       ? Object.values(catalog).map((terms) => terms[0])
       : (catalog[category] || Object.values(catalog).map((terms) => terms[0]));
-  const maxPerSearch = Math.max(1, Math.ceil(limit / selectedTerms.length));
+  const effectiveTerms=selectedTerms.slice(0,Math.max(1,Math.min(selectedTerms.length,limit)));
+  const maxPerSearch = Math.max(1, Math.ceil(limit / effectiveTerms.length));
+  const runQuery=new URLSearchParams({memory:"4096",timeout:"21600",maxItems:String(limit)});
+  if(options.costLimit!=null)runQuery.set("maxTotalChargeUsd",String(Math.min(0.1,Math.max(0.01,options.costLimit))));
 
-  const response = await fetch("https://api.apify.com/v2/acts/lukaskrivka~google-maps-with-contact-details/runs?memory=4096&timeout=21600", {
+  const response = await fetch(`https://api.apify.com/v2/acts/lukaskrivka~google-maps-with-contact-details/runs?${runQuery}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": USER_AGENT },
     body: JSON.stringify({
-      searchStringsArray: selectedTerms,
+      searchStringsArray: effectiveTerms,
       ...(center ? { customGeolocation: circleGeoJson(center, radiusKm) } : { locationQuery: `${region}, ${country}` }),
       maxCrawledPlacesPerSearch: maxPerSearch,
       language,
@@ -318,11 +323,12 @@ async function persistSearchItems(run: SearchRunRow, items: Array<NonNullable<Re
   for (let offset = 0; offset < items.length; offset += 200) {
     const batch = items.slice(offset, offset + 200);
     const leadRows = batch.map((item) => ({
-      workspace_id: run.workspace_id, source: "apify_google_maps", external_id: item.id,
+      workspace_id: run.workspace_id, search_run_id: run.id, source: "apify_google_maps", external_id: item.id,
       company_name: item.company, website: item.website, phone: item.phone, email: item.email,
-      linkedin_url: item.linkedinUrl, industry: item.kind, address: item.location,
+      linkedin_url: item.linkedinUrl, industry: item.kind, category: item.kind, address: item.location,
       region: textValue(run.query.region), country_code: countryCode || null,
       latitude: item.coordinates?.lat, longitude: item.coordinates?.lon,
+      google_place_id: item.id, google_maps_url: item.sourceUrl,
       status: item.status === "À appeler" ? "to_call" : item.status === "À vérifier" ? "to_review" : "new",
       score: item.score, confidence: item.confidence, parking_status: "unknown",
       fit_score: item.score, priority_score: item.score, data_confidence: item.confidence,
@@ -415,15 +421,20 @@ function toOpportunity(place: ApifyPlace, stations: Station[], profile: string) 
   const category = humanCategory([textValue(place.categoryName), ...(place.categories || [])].filter(Boolean).join(" "));
   const rating = numberValue(place.totalScore);
   const reviewsCount = numberValue(place.reviewsCount);
-  let score = profile === "lexicon" ? 35 : profile === "profitflow" ? 25 : 43;
+  let score = profile === "lexicon" ? 35 : profile === "profitflow" ? 25 : profile === "enterprise" ? 28 : 43;
   if (profile === "pluq") {
     if (onSite === 0) score += 24; else if (onSite <= 2) score += 8; else score -= 12;
     if (within2km <= 3) score += 12; else if (within2km <= 8) score += 5;
   } else {
     if (website) score += profile === "lexicon" ? 15 : 8;
     if ((reviewsCount || 0) >= 40) score += profile === "lexicon" ? 15 : 5;
-    if (decisionMaker) score += 10;
+    if (decisionMaker) score += profile === "enterprise" ? 16 : 10;
     if (profile === "profitflow" && !place.annualRevenue) score = Math.min(score, 65);
+    if (profile === "enterprise") {
+      if (linkedinUrl) score += 9;
+      if ((reviewsCount || 0) >= 100) score += 8;
+      if (website && phone) score += 7;
+    }
   }
   if (phone) score += 6;
   if (email || leadEmail) score += 6;
@@ -461,6 +472,9 @@ function recommendOffer(input: { profile: string; category: string; onSite: numb
   }
   if (input.profile === "profitflow") {
     return { offer: "Profitflow", reason: "Profil de PME compatible avec une analyse cashflow ou talents. Chiffre d'affaires et besoin réel à confirmer avant contact." };
+  }
+  if (input.profile === "enterprise") {
+    return { offer: "À analyser", reason: "Signaux publics compatibles avec une organisation structurée ou multi-sites. La taille, le budget et le besoin restent des probabilités à valider avec un décideur." };
   }
   if (input.profile === "lexicon" || (input.website && (input.reviewsCount || 0) >= 40)) {
     return { offer: "Lexicon", reason: "Présence numérique déjà visible : potentiel d'amélioration de l'autorité, de la réputation et de la visibilité dans les moteurs IA." };
