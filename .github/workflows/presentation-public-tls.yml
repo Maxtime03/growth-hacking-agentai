@@ -1,0 +1,63 @@
+name: Presentation dependencies on public TLS
+
+on:
+  push:
+    branches:
+      - chore/presentation-public-tls-validation
+    paths:
+      - .github/workflows/presentation-public-tls.yml
+      - .dockerignore
+      - package.json
+      - package-lock.json
+      - worker/presentations/Dockerfile
+      - worker/presentations/secure-npm-ci.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-tls-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify TLS safeguards
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const files = [
+            'worker/presentations/Dockerfile',
+            'worker/presentations/secure-npm-ci.mjs',
+          ];
+          const source = files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+          const forbidden = [
+            ['NODE_TLS_REJECT_', 'UNAUTHORIZED=0'].join(''),
+            ['strict-', 'ssl false'].join(''),
+            ['strict-', 'ssl=false'].join(''),
+            ['curl ', '-k'].join(''),
+            ['wget ', '--no-check-certificate'].join(''),
+          ];
+          const found = forbidden.filter((token) => source.includes(token));
+          if (found.length) throw new Error('Forbidden TLS bypass detected');
+          NODE
+          test "$(npm config get strict-ssl)" = "true"
+
+      - name: Build dependency target without custom CA or secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --no-cache \
+            --progress=plain \
+            --target presentation-deps-public-tls \
+            --file worker/presentations/Dockerfile \
+            --output type=cacheonly \
+            .

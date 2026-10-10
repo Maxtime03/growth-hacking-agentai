@@ -1,0 +1,14 @@
+.git
+.env*
+node_modules
+dist
+outputs
+work
+test-results
+playwright-report
+supabase/.temp
+*.pptx
+*.pdf
+*.png
+*.ttf
+*.otf
